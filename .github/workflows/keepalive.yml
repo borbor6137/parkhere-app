@@ -1,0 +1,13 @@
+# ปลุก Render (แผนฟรีหลับหลังไม่มีคนใช้ 15 นาที) ทุก 10 นาที
+name: keep-alive
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -s -o /dev/null -w "api %{http_code}\n" --max-time 90 https://parkhere-api-fe18.onrender.com/api/lot || true
+          curl -s -o /dev/null -w "web %{http_code}\n" --max-time 60 https://parkhere-yomm.onrender.com/ || true
