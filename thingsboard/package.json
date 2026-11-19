@@ -1,0 +1,18 @@
+{
+  "name": "parkhere-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "เชื่อม ThingsBoard (กล้อง Edge Impulse / เซนเซอร์ / ไม้กั้น) กับ Firebase (แอป ParkHere)",
+  "main": "bridge.js",
+  "scripts": {
+    "start": "node bridge.js",
+    "device-sim": "node device-sim.js",
+    "api": "node api/server.js",
+    "test": "node --test api/test/api.test.js api/test/lot.test.js api/test/lot-multi.test.js api/test/lot-watch.test.js api/test/b1.test.js api/test/m4b1.test.js api/test/m4b2.test.js api/test/m4b3.test.js api/test/m4b4.test.js api/test/m4b5.test.js api/test/barrier-cycle.test.js api/test/m5b1.test.js api/test/m5b2.test.js api/test/m5fix.test.js api/test/m6map.test.js api/test/booking.test.js api/test/life.test.js api/test/sec.test.js api/test/probe-m3.test.js api/test/demo-sim11.test.js",
+    "test:live-m2": "node api/test/live-m2.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "firebase": "10.12.2"
+  }
+}

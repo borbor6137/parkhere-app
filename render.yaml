@@ -1,0 +1,31 @@
+# Render Blueprint: Dashboard -> New -> Blueprint -> เลือก repo นี้
+services:
+  # เว็บแอป ParkHere (ผู้ใช้ / Admin / Master) – static site ฟรี
+  - type: web
+    name: parkhere
+    runtime: static
+    buildCommand: mkdir -p public && cp index.html slotname.js script.js style.css admin.html master.html board-simulator.html public/
+    staticPublishPath: ./public
+
+  # ตัวเชื่อม ThingsBoard <-> Firebase
+  - type: web
+    name: parkhere-bridge
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: thingsboard
+    buildCommand: npm install
+    startCommand: node bridge.js
+    healthCheckPath: /
+    envVars:
+      - key: TB_HOST
+        value: https://thingsboard.cloud
+      - key: FB_EMAIL
+        value: board@parkhere.com
+      - key: TB_SENSOR_DEVICE_ID          # device "ParkHere-Lot" บน ThingsBoard Cloud
+        value: b4256bd0-d96d-11f1-86c1-cdf15b9d0c51
+      # ค่าลับ: กรอกเองใน Render ตอนสร้าง Blueprint – ห้ามใส่ใน repo
+      - key: TB_API_KEY                   # ThingsBoard -> Profile -> API keys
+        sync: false
+      - key: FB_PASSWORD                  # รหัสผ่านบัญชี board@parkhere.com
+        sync: false

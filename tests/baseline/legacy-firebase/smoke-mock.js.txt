@@ -1,0 +1,141 @@
+/*
+ * Smoke แบบจำลอง (mock) ของหน้าผู้ใช้ ParkHere  --  baseline ก่อนแก้ (P0-2)
+ * รูปแบบไฟล์: ฟังก์ชัน async (page) => {...} สำหรับ Playwright MCP (browser_run_code_unsafe)
+ *
+ * ความปลอดภัยของข้อมูล: เหมือน capture.js คือเปิด context ใหม่ บล็อกทุกโฮสต์ที่ไม่ใช่ localhost/ฟอนต์/CDN ของ SDK
+ * จึงไม่มีคำขอไป Firebase จริง; db.ref ถูกแทนด้วยฐานข้อมูลในหน่วยความจำ; session เป็นข้อมูลปลอม (example.test)
+ * ขอบเขต: ทดสอบตรรกะของหน้าเว็บเท่านั้น  สมัคร/login/Google/ลืมรหัสผ่านที่ยิง Firebase Auth จริง และไม้กั้นจริง "ไม่อยู่ในไฟล์นี้"
+ * ผลลัพธ์: คืน JSON รายการ { id, ok, note } นำไปใส่ใน docs/qa/2026-11-16-baseline/smoke-list.md
+ */
+async (page) => {
+  const BASE = 'http://localhost/ParkHere/index.html';
+  const ALLOW = ['localhost', 'fonts.googleapis.com', 'fonts.gstatic.com', 'www.gstatic.com', 'cdn.jsdelivr.net'];
+  const browser = page.context().browser();
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, locale: 'th-TH', timezoneId: 'Asia/Bangkok', serviceWorkers: 'block' });
+  const blocked = new Set();
+  await ctx.route('**/*', r => { const u = new URL(r.request().url()); if (ALLOW.includes(u.hostname)) return r.continue(); blocked.add(u.hostname); return r.abort(); });
+  const pg = await ctx.newPage();
+  const errors = [];
+  pg.on('pageerror', e => errors.push(e.message.slice(0, 160)));
+  pg.on('console', m => { if (m.type() === 'error' && !/Failed to load resource|ERR_FAILED|net::/.test(m.text())) errors.push('console: ' + m.text().slice(0, 160)); });
+  pg.on('dialog', d => d.accept());
+  await pg.goto(BASE, { waitUntil: 'load' });
+  await pg.waitForTimeout(800);
+  const R = [];
+  const rec = (id, ok, note) => R.push({ id, ok: !!ok, note: note || '' });
+  const txt = sel => pg.evaluate(s => { const e = document.querySelector(s); return e ? e.textContent.trim() : null }, sel);
+  const msgOf = id => pg.evaluate(i => document.getElementById(i).textContent.trim(), id);
+
+  // ---------- ตรวจข้อความตรวจสอบฟอร์ม (ไม่ยิง Firebase เพราะ return ก่อน) ----------
+  await pg.evaluate("show('signup')");
+  const fill = (m) => pg.evaluate(m => { for (const [k, v] of Object.entries(m)) document.getElementById(k).value = v }, m);
+  await fill({ 's-user': '', 's-pass': '', 's-pass2': '', 's-email': '', 's-plate': '' });
+  await pg.click('#btn-signup'); const e1 = await msgOf('s-msg');
+  await fill({ 's-user': 'ผู้ทดสอบ', 's-pass': 'abcdef', 's-pass2': 'abcdef', 's-email': 'not-an-email', 's-plate': 'กข 1234' });
+  await pg.click('#btn-signup'); const e2 = await msgOf('s-msg');
+  await fill({ 's-email': 'a@example.test', 's-pass': 'abc', 's-pass2': 'abc' });
+  await pg.click('#btn-signup'); const e3 = await msgOf('s-msg');
+  await fill({ 's-pass': 'abcdef', 's-pass2': 'abcdeg' });
+  await pg.click('#btn-signup'); const e4 = await msgOf('s-msg');
+  rec('signup-validate', e1.includes('ให้ครบ') && e2.includes('อีเมล') && e3.includes('6') && e4.includes('ไม่ตรง'), [e1, e2, e3, e4].join(' | '));
+  await pg.evaluate("show('login')");
+  await fill({ 'l-email': '', 'l-pass': '' }); await pg.click('#btn-login');
+  rec('login-validate', (await msgOf('l-msg')).includes('กรุณากรอก'), await msgOf('l-msg'));
+  await pg.evaluate("show('forgot')"); await fill({ 'f-email': '' }); await pg.click('#btn-forgot');
+  rec('forgot-validate', (await msgOf('f-msg')).includes('กรุณากรอก'), await msgOf('f-msg'));
+
+  // ---------- เตรียม session ปลอม + ฐานข้อมูลในหน่วยความจำ ----------
+  await pg.evaluate(() => {
+    window.__writes = []; window.__tree = {};
+    const getAt = p => p.split('/').filter(Boolean).reduce((o, k) => (o == null ? undefined : o[k]), window.__tree);
+    const setAt = (p, v) => { const ks = p.split('/').filter(Boolean); let o = window.__tree; ks.slice(0, -1).forEach(k => { o[k] = o[k] || {}; o = o[k] }); if (v === null || v === undefined) delete o[ks[ks.length - 1]]; else o[ks[ks.length - 1]] = v };
+    db.ref = path => {
+      const r = {
+        on() { return r }, off() {}, once() { return Promise.resolve({ val: () => getAt(path) ?? null }) },
+        set(v) { window.__writes.push({ op: 'set', path, v }); setAt(path, v); return Promise.resolve() },
+        update(v) { window.__writes.push({ op: 'update', path, keys: Object.keys(v || {}) }); return Promise.resolve() },
+        remove() { window.__writes.push({ op: 'remove', path }); setAt(path, null); return Promise.resolve() },
+        transaction(fn) { const cur = getAt(path) ?? null; const nv = fn(cur); window.__writes.push({ op: 'tx', path, committed: nv !== undefined }); if (nv !== undefined) setAt(path, nv); return Promise.resolve({ committed: nv !== undefined }) },
+        child(k) { return db.ref(path + '/' + k) }
+      };
+      return r;
+    };
+    session = { uid: 'test-uid-a', user: 'ผู้ทดสอบ เอ', email: 'tester-a@example.test', plate: 'กข 1234 · กรุงเทพมหานคร', cars: ['กข 1234 · กรุงเทพมหานคร'], pays: [], books: [], rcp: [] };
+    takenMap = {}; sensorMap = { '1-0': { occ: false } }; closedMap = {}; barMap = {}; gateWait = null; lastSeen = Date.now();
+    N = 12; FL = 3; RATE = 20; BOOKFEE = 20; FREEMIN = 30; NOSHOW_MIN = 30;
+    S = { v: 'home', f: 1, s: null, t: null, d: null, pm: 'pp', msg: '' };
+    show('home'); render();
+  });
+  const click = sel => pg.evaluate(s => document.querySelector(s).click(), sel);
+  const state = () => pg.evaluate(() => ({ v: S.v, st: S.st, msg: S.msg, d: S.d, books: session.books.length, rcp: session.rcp.map(r => r.amt), cars: session.cars.length, pays: session.pays.length }));
+
+  // ---------- จอง: เลือกชั้น -> ช่อง -> ป๊อปอัป -> ไปชำระเงิน ----------
+  await click('[data-a=v][data-v=floors]'); await click('[data-a=floor][data-f="1"]'); await click('[data-a=slot][data-i="0"]');
+  const popup = await pg.evaluate(() => !!document.querySelector('#modal .modal') && document.querySelector('#modal').textContent.includes('จองช่อง F1-A1'));
+  await click('[data-a=topay]');
+  let s = await state();
+  rec('book-to-pay', popup && s.v === 'pay' && s.d && s.d.amt === 20, 'popup=' + popup + ' v=' + s.v + ' amt=' + (s.d && s.d.amt));
+
+  // ---------- จ่ายล้มเหลวแล้วกลับหน้าจ่าย (บังคับ Math.random = 0.9 -> ล้มเหลว) ----------
+  await pg.evaluate(() => { window.__r = Math.random; Math.random = () => 0.9 });
+  await click('[data-a=paynow]'); await pg.waitForTimeout(2400);
+  s = await state();
+  rec('pay-fail-back', s.v === 'pay' && s.msg.includes('ไม่สำเร็จ') && s.d && s.books === 0, 'v=' + s.v + ' msg=' + s.msg + ' books=' + s.books);
+  // ---------- จ่ายสำเร็จ (Math.random = 0.1) ----------
+  await pg.evaluate(() => { Math.random = () => 0.1 });
+  await click('[data-a=paynow]'); await pg.waitForTimeout(2400);
+  s = await state();
+  const tx = await pg.evaluate(() => window.__writes.filter(w => w.op === 'tx'));
+  rec('pay-success', s.v === 'check' && s.st === 'ok' && s.books === 1 && s.rcp[0] === 20 && tx.length === 1 && tx[0].committed, 'v=' + s.v + ' st=' + s.st + ' books=' + s.books + ' rcp=' + JSON.stringify(s.rcp) + ' tx=' + JSON.stringify(tx));
+  await pg.evaluate(() => { Math.random = window.__r });
+
+  // ---------- ลดไม้กั้น (เขียน barrier/1-0/cmd) ----------
+  await pg.evaluate("S.v='home';render()");
+  const hasGate = await pg.evaluate(() => !!document.querySelector('[data-a=gate]'));
+  if (hasGate) await click('[data-a=gate]');
+  const gw = await pg.evaluate(() => window.__writes.filter(w => w.path === 'barrier/1-0/cmd'));
+  rec('gate-cmd', hasGate && gw.length === 1 && gw[0].v && gw[0].v.u === 'test-uid-a', 'ปุ่ม=' + hasGate + ' เขียน cmd=' + gw.length + ' (ไม้กั้นจริงไม่ได้ทดสอบ)');
+  await pg.evaluate(() => { clearTimeout(gateWait && gateWait.to); gateWait = null });
+
+  // ---------- ออกจากลานจอด (dialog ถูก accept) ----------
+  await pg.evaluate("S.v='home';render()");
+  await click('[data-a=out]');
+  s = await state();
+  const exited = await pg.evaluate(() => !!session.books[0].out && session.books[0].min >= 1);
+  rec('exit-lot', exited, 'out/min ถูกตั้ง; rcp=' + JSON.stringify(s.rcp) + ' (ฟรีภายใน 30 นาทีไม่มีใบเสร็จค่าจอด)');
+
+  // ---------- เพิ่ม/ลบรถ ----------
+  await pg.evaluate("S.v='cars';render()");
+  await pg.evaluate(() => { document.getElementById('c-new').value = 'ขค 5555' });
+  await click('[data-a=addcar]'); s = await state(); const c1 = s.cars;
+  await pg.evaluate(() => { document.getElementById('c-new').value = 'ขค 5555' });
+  await click('[data-a=addcar]'); s = await state(); const dupMsg = s.msg;
+  await click('[data-a=delcar]'); s = await state();
+  rec('car-add-del', c1 === 2 && dupMsg.includes('มีทะเบียนนี้แล้ว') && s.cars === 1, 'หลังเพิ่ม=' + c1 + ' ซ้ำ="' + dupMsg + '" หลังลบ=' + s.cars);
+
+  // ---------- เพิ่ม/ลบวิธีจ่าย ----------
+  await pg.evaluate("S.v='me';render()");
+  await pg.evaluate(() => { document.getElementById('p-type').value = 'card'; document.getElementById('p-info').value = '123' });
+  await click('[data-a=addpay]'); s = await state(); const shortMsg = s.msg;
+  await pg.evaluate(() => { document.getElementById('p-type').value = 'card'; document.getElementById('p-info').value = '4242424242424242' });
+  await click('[data-a=addpay]'); s = await state(); const p1 = s.pays;
+  const stored = await pg.evaluate(() => JSON.stringify(session.pays));
+  await click('[data-a=delpay]'); s = await state();
+  rec('pay-method-add-del', shortMsg.includes('ให้ครบ') && p1 === 1 && s.pays === 0 && !stored.includes('4242424242424242'), 'เลขสั้น="' + shortMsg + '" เก็บ=' + stored + ' หลังลบ=' + s.pays);
+
+  // ---------- EN ----------
+  await pg.evaluate("S.v='home';render();setLang('en')");
+  await pg.waitForTimeout(300);
+  // ตัดข้อมูลผู้ใช้ (ชื่อ ทะเบียน จังหวัด) และสัญลักษณ์ ฿ ออก เหลือเฉพาะข้อความของระบบ
+  const thLeft = await pg.evaluate(() => {
+    let t = document.getElementById('view').innerText + ' ' + document.getElementById('nav').innerText;
+    [session.user, session.cars[0], session.plate].forEach(x => { t = t.split(x).join(' ') });
+    t = t.replace(/ผู้ทดสอบ|กรุงเทพมหานคร|กข|฿/g, ' ').replace(session.user[0], ' ');   // ตัวอักษรแรกของชื่อ = ป้ายอวาตาร์
+    return (t.match(/[฀-๿]+/g) || []).slice(0, 8);
+  });
+  const enOk = await pg.evaluate(() => document.getElementById('nav').innerText.includes('Home'));
+  rec('lang-en', enOk && thLeft.length === 0, 'nav=Home:' + enOk + ' อักษรไทยที่เหลือบนหน้า home=' + JSON.stringify(thLeft));
+
+  await ctx.close();
+  return JSON.stringify({ results: R, pageErrors: errors.slice(0, 10), blockedHosts: [...blocked] }, null, 1);
+}

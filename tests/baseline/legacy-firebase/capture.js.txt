@@ -1,0 +1,241 @@
+/*
+ * เก็บภาพ baseline ของ ParkHere (P0-2)  --  รูปแบบไฟล์: ฟังก์ชัน async (page) => {...} สำหรับ Playwright MCP
+ * วิธีรัน: เครื่องมือ browser_run_code_unsafe ให้ filename = ไฟล์นี้ (ตั้ง GROUP ด้านล่างทีละกลุ่ม)
+ *   GROUP = 'all' รันทุกกลุ่มต่อกัน (ค่าตั้งต้น) หรือเลือกทีละกลุ่ม:
+ *   GROUP = 'core'   หน้าผู้ใช้หลัก 16 หน้า x 5 ขนาด x สว่าง/มืด
+ *   GROUP = 'extra'  หน้าผู้ใช้เพิ่มเติม (ข้อความผิดพลาด, ป๊อปอัป, หน้าว่าง) ที่ 375 และ 1280, สว่าง/มืด
+ *   GROUP = 'en'     โหมดภาษาอังกฤษ ที่ 375, สว่าง/มืด
+ *   GROUP = 'admin' | 'master'   5 ขนาด (ธีมของสองหน้านี้เป็นมืดคงที่ ไม่มีโหมดสว่าง)
+ *
+ * ความปลอดภัยของข้อมูล
+ *  - เปิดเบราว์เซอร์ context ใหม่แยกต่างหาก (ไม่แตะแท็บของคนอื่น) และบล็อกทุกโฮสต์ที่ไม่ใช่ localhost / ฟอนต์ / CDN ของ SDK
+ *    จึงไม่มีคำขอไป Firebase จริงเลย (ทั้ง Auth และ Realtime Database)
+ *  - db.ref ถูกแทนด้วย stub ที่ไม่ทำอะไร: ถ้าโค้ดหน้าเว็บพยายามเขียน จะไม่ไปไหน
+ *  - ข้อมูลทั้งหมดเป็นข้อมูลปลอม (example.test, ชื่อ "ผู้ทดสอบ") ใส่ผ่าน page.evaluate เท่านั้น ไม่ล็อกอินและไม่กดปุ่มที่เขียนข้อมูล
+ *  - เวลาในหน้าถูกตรึงที่ 2026-11-16 10:00 (+07:00) ภาพจึงเหมือนกันทุกครั้ง; ตัวนับเวลา (setInterval 1 วินาที) ถูกปิด
+ */
+async (page) => {
+  const GROUP = 'all';
+  const OUT = 'C:/xampp/htdocs/ParkHere/docs/qa/2026-11-16-baseline/';
+  const BASE = 'http://localhost/ParkHere/';
+  const FIXED = new Date('2026-11-16T10:00:00+07:00');
+  const SIZES = { 360: [360, 740], 375: [375, 812], 390: [390, 844], 768: [768, 1024], 1280: [1280, 800] };
+  const ALLOW = ['localhost', 'fonts.googleapis.com', 'fonts.gstatic.com', 'www.gstatic.com', 'cdn.jsdelivr.net'];
+
+  // ---------- สถานะปลอมของหน้าผู้ใช้ (รันในหน้าเว็บ) ----------
+  const USER_FX = () => {
+    const NOW = Date.now(), min = 60000, day = 864e5;
+    window.F = { NOW, car1: 'กข 1234 · กรุงเทพมหานคร', car2: '1กก 5678 · เชียงใหม่' };
+    const mk = () => { const r = { on() { return r }, off() {}, once() { return Promise.resolve({ val: () => null }) }, set() { return Promise.resolve() }, update() { return Promise.resolve() }, remove() { return Promise.resolve() }, transaction() { return Promise.resolve({ committed: false }) }, child() { return r } }; return r };
+    db.ref = () => mk();
+    window.setApp = (o = {}) => {
+      const s0 = NOW - 40 * min;
+      const books = [
+        { id: 'b-active', f: 1, i: 2, car: F.car1, amt: 20, s: s0, e: s0 + 30 * day, pm: 'pp', status: 'active', v2: true, min: 0, arr: 1 },
+        { id: 'b-done', f: 2, i: 5, car: F.car2, amt: 20, s: NOW - 2 * day, e: NOW + 28 * day, out: NOW - 2 * day + 95 * min, min: 95, park: 22, pm: '0', status: 'active', v2: true },
+        { id: 'b-canc', f: 1, i: 7, car: F.car1, amt: 20, s: NOW - 5 * day, e: NOW + 25 * day, pm: 'pp', status: 'cancelled', v2: true, min: 0 },
+        { id: 'b-ns', f: 3, i: 1, car: F.car2, amt: 20, s: NOW - 7 * day, e: NOW + 23 * day, pm: 'pp', status: 'noshow', v2: true, min: 0 }
+      ];
+      const rcp = [
+        { no: 'PH00000004', t: NOW - 2 * day + 95 * min, desc: 'ค่าจอดตามเวลา F2-B2 (95 นาที)', amt: 22, pm: '0' },
+        { no: 'PH00000003', t: NOW - 40 * min, desc: 'ค่าจองช่อง F1-A3', amt: 20, pm: 'pp' },
+        { no: 'PH00000002', t: NOW - 5 * day, desc: 'คืนเงิน F1-B4', amt: -20, pm: 'pp' },
+        { no: 'PH00000001', t: NOW - 2 * day - 5 * min, desc: 'ค่าจองช่อง F2-B2', amt: 20, pm: '0' }
+      ];
+      session = {
+        uid: 'test-uid-a', user: 'ผู้ทดสอบ เอ', email: 'tester-a@example.test', plate: F.car1,
+        cars: o.cars || [F.car1, F.car2], pays: o.pays || [{ t: 'card', info: '4242' }, { t: 'pp', info: '0800000000' }],
+        books: o.nobooks ? [] : books, rcp: o.norcp ? [] : rcp
+      };
+      const other = (id, s) => ({ [id]: { s, e: s + 30 * day, u: 'ผู้ใช้ทดสอบ บี', uid: 'test-uid-b' } });
+      takenMap = o.nobooks ? { '1-3': other('x-other-1', NOW - 10 * min), '2-0': other('x-other-2', NOW - 3 * min) }
+        : { '1-2': { 'b-active': { s: s0, e: s0 + 30 * day, u: 'ผู้ทดสอบ เอ', uid: 'test-uid-a' } }, '1-3': other('x-other-1', NOW - 10 * min), '2-0': other('x-other-2', NOW - 3 * min) };
+      sensorMap = { '1-0': { occ: false }, '1-1': { occ: true }, '1-5': { occ: false }, '2-1': { occ: true } };
+      if (!o.nobooks) sensorMap['1-2'] = { occ: false };
+      closedMap = { '1-4': true };
+      lastSeen = o.offline ? NOW - 5 * 60000 : NOW - 5000;
+      barMap = {}; gateWait = null;
+      N = 12; FL = 3; RATE = 20; BOOKFEE = 20; FREEMIN = 30; NOSHOW_MIN = 30;
+    };
+    window.go = (st, o) => {
+      setApp(o);
+      S = Object.assign({ v: 'home', f: 1, s: null, t: null, d: null, pm: 'pp', msg: '' }, st || {});
+      show('home'); render();
+    };
+    window.__clean = () => {
+      document.querySelectorAll('body > .back, #pick').forEach(e => e.remove());
+      const t = document.getElementById('toast'); t.classList.remove('show');
+      ['l-msg', 's-msg', 'f-msg'].forEach(m => setMsg(m, ''));
+      ['l-email', 'l-pass', 's-user', 's-pass', 's-pass2', 's-email', 's-plate', 'f-email'].forEach(i => document.getElementById(i).value = '');
+      window.scrollTo(0, 0);
+    };
+  };
+
+  // ---------- รายการหน้าจอของผู้ใช้: [ชื่อไฟล์, เต็มหน้า?, โค้ดที่รันก่อนถ่าย] ----------
+  const pay = { v: 'pay', d: { f: 1, i: 0, car: 'กข 1234 · กรุงเทพมหานคร', amt: 20 } };
+  const U = {
+    'loading': [true, "show('loading');const f=$('fill');f.style.transition='none';f.style.width='55%'"],
+    'entering': [true, "show('entering');const f=$('fill2');f.style.transition='none';f.style.width='55%'"],
+    'login': [true, "show('login')"],
+    'login-error': [true, "show('login');$('l-email').value='a.tester@example.test';$('l-pass').value='xxxxxxxx';setMsg('l-msg','อีเมลหรือรหัสผ่านไม่ถูกต้อง','err')"],
+    'signup': [true, "show('signup')"],
+    'signup-error': [true, "show('signup');$('s-user').value='ผู้ทดสอบ เอ';$('s-pass').value='xxxxxxxx';$('s-pass2').value='yyyyyyyy';$('s-email').value='a.tester@example.test';$('s-plate').value='กข 1234';setMsg('s-msg','รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน','err')"],
+    'signup-province-picker': [false, "show('signup');openProv($('s-prov'))"],
+    'forgot': [true, "show('forgot')"],
+    'home': [true, "go({v:'home'})"],
+    'home-empty': [true, "go({v:'home'},{nobooks:true})"],
+    'floors': [true, "go({v:'floors'})"],
+    'map': [true, "go({v:'map',f:1})"],
+    'map-offline': [true, "go({v:'map',f:1},{offline:true})"],
+    'booking-popup': [false, "go({v:'map',f:1,s:0})"],
+    'booking-popup-error': [false, "go({v:'map',f:1,s:0,msg:'ช่องนี้ไม่ว่างแล้ว'})"],
+    'booking-popup-nocar': [false, "go({v:'map',f:1,s:0},{cars:[]})"],
+    'pay': [true, "go(" + JSON.stringify(pay) + ")"],
+    'pay-failed': [true, "go(Object.assign(" + JSON.stringify(pay) + ",{msg:'ชำระเงินไม่สำเร็จ กรุณาลองอีกครั้ง'}))"],
+    'check-wait': [true, "go({v:'check',st:'wait'})"],
+    'check-ok': [true, "go({v:'check',st:'ok',last:'b-active'})"],
+    'books': [true, "go({v:'books'})"],
+    'books-empty': [true, "go({v:'books'},{nobooks:true})"],
+    'ticket': [false, "go({v:'books',t:'b-active'})"],
+    'cars': [true, "go({v:'cars'})"],
+    'cars-empty': [true, "go({v:'cars'},{cars:[]})"],
+    'cars-error': [true, "go({v:'cars',msg:'มีทะเบียนนี้แล้ว'})"],
+    'me': [true, "go({v:'me'})"],
+    'me-error': [true, "go({v:'me',msg:'กรอกเลขบัตรให้ครบ'})"],
+    'rcp': [true, "go({v:'rcp'})"],
+    'rcp-empty': [true, "go({v:'rcp'},{norcp:true})"],
+    'toast': [false, "go({v:'home'});toast('ออกจากลานจอดแล้ว ค่าจอด ฿4')"],
+    'popup-admin-cancelled': [false, "go({v:'home'});showCancelPopup(session.books[0],'ช่องจอดมีปัญหา / ซ่อมบำรุง')"],
+    'popup-role-promote': [false, "go({v:'home'});showRolePopup({type:'promote',username:'adm_test123'})"]
+  };
+  const CORE = ['loading', 'login', 'signup', 'forgot', 'home', 'floors', 'map', 'booking-popup', 'pay', 'pay-failed', 'check-wait', 'check-ok', 'books', 'cars', 'me', 'rcp'];
+  const EXTRA = ['entering', 'login-error', 'signup-error', 'signup-province-picker', 'home-empty', 'map-offline', 'booking-popup-error', 'booking-popup-nocar', 'books-empty', 'ticket', 'cars-empty', 'cars-error', 'me-error', 'rcp-empty', 'toast', 'popup-admin-cancelled', 'popup-role-promote'];
+  const EN = ['login', 'home', 'map', 'booking-popup', 'pay', 'books', 'cars', 'me'];
+
+  // ---------- admin / master ----------
+  const ADM_FX = () => {
+    const NOW = Date.now(), min = 60000, day = 864e5;
+    const mkr = () => { const r = { on() { return r }, off() {}, once() { return Promise.resolve({ val: () => null, exists: () => false }) }, set() { return Promise.resolve() }, update() { return Promise.resolve() }, remove() { return Promise.resolve() }, child() { return r } }; return r };
+    db.ref = () => mkr();
+    const bk = (id, f, i, car, s, extra) => Object.assign({ id, f, i, car, amt: 20, s, e: s + 30 * day, pm: 'pp', status: 'active', v2: true, min: 0 }, extra || {});
+    users = {
+      'test-uid-a': { user: 'ผู้ทดสอบ เอ', email: 'tester-a@example.test', plate: 'กข 1234 · กรุงเทพมหานคร', books: {
+        a1: bk('a1', 1, 2, 'กข 1234 · กรุงเทพมหานคร', NOW - 40 * min, { arr: 1 }),
+        a2: bk('a2', 2, 5, '1กก 5678 · เชียงใหม่', NOW - 2 * day, { out: NOW - 2 * day + 95 * min, min: 95, park: 22 }),
+        a3: bk('a3', 1, 7, 'กข 1234 · กรุงเทพมหานคร', NOW - 5 * day, { status: 'cancelled' }) },
+        rcp: { r1: { no: 'PH00000003', t: NOW - 40 * min, desc: 'ค่าจองช่อง F1-A3', amt: 20 }, r2: { no: 'PH00000004', t: NOW - 2 * day, desc: 'ค่าจอดตามเวลา F2-B2 (95 นาที)', amt: 22 }, r3: { no: 'PH00000002', t: NOW - 5 * day, desc: 'คืนเงิน', amt: -20 } } },
+      'test-uid-b': { user: 'ผู้ใช้ทดสอบ บี', email: 'tester-b@example.test', plate: '2ขข 9999 · ชลบุรี', books: {
+        b1: bk('b1', 1, 3, '2ขข 9999 · ชลบุรี', NOW - 10 * min),
+        b2: bk('b2', 3, 1, '2ขข 9999 · ชลบุรี', NOW - 7 * day, { status: 'noshow' }) },
+        rcp: { r1: { no: 'PH00000005', t: NOW - 10 * min, desc: 'ค่าจองช่อง F1-A4', amt: 20 } } },
+      'test-uid-c': { user: 'ผู้ใช้ทดสอบ ซี', email: 'tester-c@example.test', plate: '3คค 1111 · ภูเก็ต' }
+    };
+    sensors = { '1-0': { occ: false }, '1-1': { occ: true }, '1-2': { occ: true }, '1-5': { occ: false }, '2-1': { occ: true } };
+    closed = { '1-4': true };
+    cancels = {}; bars = { '1-3': { state: { down: true, b: 'b1', car: '', t: NOW } } };
+    lastSeen = NOW - 5000;
+    cfg = { rate: 20, bookfee: 20, freemin: 30, floors: 3, slots: 12, noshow: 30 };
+    [['c-rate', 'rate'], ['c-pen', 'bookfee'], ['c-fr', 'freemin'], ['c-fl', 'floors'], ['c-sl', 'slots'], ['c-ns', 'noshow']].forEach(([i, k]) => document.getElementById(i).value = cfg[k]);
+    if (typeof admins !== 'undefined') admins = { 'adm-uid-1': { username: 'adm_test123', email: 'adm_test123@example.test', name: 'ผู้ใช้ทดสอบ บี', forUid: 'test-uid-b', t: NOW - 3 * day } };
+    if (typeof P !== 'undefined') P = [];
+    const c = document.getElementById('curtain'); if (c) c.remove();
+    document.getElementById('login').style.display = 'none';
+    document.getElementById('app').classList.add('on');
+    document.getElementById('mail').textContent = 'admin@example.test';
+    document.getElementById('clk').textContent = new Date().toLocaleString('th-TH', { dateStyle: 'full', timeStyle: 'medium' });
+    uReady = false;
+    if (typeof drawM === 'function') drawM();
+    (typeof drawA === 'function' ? drawA : draw)();
+  };
+  const A_NAV = p => "document.querySelector('.nv[data-p=" + p + "]').click()";
+  const ADMIN = {
+    '01-login': [true, null],
+    '02-overview': [true, A_NAV('ov')],
+    '03-slots': [true, A_NAV('sl')],
+    '04-slots-barrier-mode': [true, A_NAV('sl') + ";$('bmode').click()"],
+    '05-bookings': [true, A_NAV('bk')],
+    '06-users': [true, A_NAV('us')],
+    '07-settings': [true, A_NAV('st')],
+    '08-cancel-dialog': [false, A_NAV('bk') + ";askReason('ยกเลิกการจองช่อง F1-A3','ของ <b>ผู้ทดสอบ เอ</b> · ทะเบียน กข 1234<br>ระบบจะคืนค่าจอง ฿20 ให้ผู้ใช้ และแจ้งเตือนผู้ใช้ทันที')"]
+  };
+  const M_NAV = p => "document.querySelector('.tb[data-p=" + p + "]').click()";
+  const MASTER = {
+    '01-login': [true, null],
+    '02-overview': [true, M_NAV('ov')],
+    '03-slots': [true, M_NAV('sl')],
+    '04-bookings': [true, M_NAV('bk')],
+    '05-users': [true, M_NAV('us')],
+    '06-admins': [true, M_NAV('ad')],
+    '07-settings': [true, M_NAV('st')],
+    '08-popup-appoint-success': [false, M_NAV('us') + ";popup('<div class=\"crown\">🎉</div><h3>แต่งตั้งสำเร็จ</h3><p><b>ผู้ใช้ทดสอบ บี</b> เป็น Admin แล้ว<br>ส่งข้อมูลเข้าสู่ระบบนี้ให้เขา</p><div class=\"cred\"><label>USERNAME</label><div><code>adm_test123</code></div></div><div class=\"cred\"><label>PASSWORD</label><div><code>xxxxxxxx</code></div></div><p class=\"warn\">⚠ รหัสผ่านแสดงครั้งเดียว ระบบไม่เก็บไว้</p><button class=\"pri\" data-close style=\"width:100%;padding:12px\">ตกลง</button>')"]
+  };
+
+  // ---------- ตัวรันกลาง ----------
+  const browser = page.context().browser();
+  const written = [], blocked = new Set(), errors = [];
+  const shot = async (pg, dir, name, size, scheme, full) => {
+    const p = OUT + dir + '/' + name + '_' + size + (scheme ? '-' + scheme : '') + '.jpg';
+    await pg.evaluate(() => window.scrollTo(0, 0));
+    await pg.waitForTimeout(120);
+    await pg.screenshot({ path: p, fullPage: full, type: 'jpeg', quality: 80, animations: 'disabled', caret: 'hide' });
+    written.push(p.slice(OUT.length));
+  };
+  const open = async (size, scheme, url, initScript) => {
+    const [w, h] = SIZES[size];
+    const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, locale: 'th-TH', timezoneId: 'Asia/Bangkok', colorScheme: scheme, reducedMotion: 'no-preference', serviceWorkers: 'block' });
+    await ctx.route('**/*', r => { const u = new URL(r.request().url()); if (ALLOW.includes(u.hostname)) return r.continue(); blocked.add(u.hostname); return r.abort(); });
+    const pg = await ctx.newPage();
+    pg.on('pageerror', e => errors.push(size + '/' + scheme + ': ' + e.message.slice(0, 160)));
+    try { await pg.routeWebSocket(/.*/, ws => ws.close()); } catch (e) {}
+    await pg.clock.install({ time: FIXED });
+    await pg.clock.setFixedTime(FIXED);
+    if (initScript) await pg.addInitScript(initScript);
+    await pg.goto(url, { waitUntil: 'load' });
+    await pg.evaluate(() => document.fonts.ready);
+    await pg.waitForTimeout(500);
+    return { ctx, pg };
+  };
+  const INDEX_INIT = "(()=>{const st=window.setTimeout,si=window.setInterval;window.setTimeout=function(f,t,...a){if(t===2100)return 0;return st.call(window,f,t,...a)};window.setInterval=function(f,t,...a){if(t===1000)return 0;return si.call(window,f,t,...a)}})()";
+
+  const runUser = async (names, sizes, schemes, lang) => {
+    for (const size of sizes) for (const scheme of schemes) {
+      const { ctx, pg } = await open(size, scheme, BASE + 'index.html', INDEX_INIT);
+      await pg.evaluate(USER_FX);
+      if (lang === 'en') await pg.evaluate("setLang('en')");
+      for (const n of names) {
+        await pg.evaluate('__clean()');
+        await pg.evaluate(U[n][1]);
+        await pg.waitForTimeout(lang === 'en' ? 350 : 180);
+        await shot(pg, lang === 'en' ? 'user-en' : 'user', (lang === 'en' ? 'en-' : '') + String(Object.keys(U).indexOf(n) + 1).padStart(2, '0') + '-' + n, size, scheme, U[n][0]);
+      }
+      await ctx.close();
+    }
+  };
+  const runAdm = async (file, defs) => {
+    for (const size of Object.keys(SIZES)) {
+      const { ctx, pg } = await open(size, 'light', BASE + file, "(()=>{const si=window.setInterval;window.setInterval=function(f,t,...a){return 0}})()");
+      for (const [name, [full, js]] of Object.entries(defs)) {
+        if (js === null) {                       // หน้าล็อกอิน (ก่อนใส่ข้อมูล)
+          const c = await pg.$('#curtain'); if (c) await pg.evaluate(() => document.getElementById('curtain').remove());
+          if (file === 'master.html') await pg.waitForTimeout(3000);
+        } else {
+          if (name.startsWith('02')) await pg.evaluate(ADM_FX);
+          else await pg.evaluate("document.querySelectorAll('.ov,#pops .ov').forEach(e=>e.remove())");
+          await pg.evaluate(js);
+          await pg.waitForTimeout(150);
+        }
+        await shot(pg, file === 'admin.html' ? 'admin' : 'master', name, size, null, full);
+      }
+      await ctx.close();
+    }
+  };
+
+  const all = Object.keys(SIZES), two = ['375', '1280'], both = ['light', 'dark'];
+  const G = GROUP === 'all' ? ['core', 'extra', 'en', 'admin', 'master'] : [GROUP];
+  if (G.includes('core')) await runUser(CORE, all, both);
+  if (G.includes('extra')) await runUser(EXTRA, two, both);
+  if (G.includes('en')) await runUser(EN, ['375'], both, 'en');
+  if (G.includes('admin')) await runAdm('admin.html', ADMIN);
+  if (G.includes('master')) await runAdm('master.html', MASTER);
+  return JSON.stringify({ group: GROUP, files: written.length, blockedHosts: [...blocked], pageErrors: errors.slice(0, 10), sample: written.slice(0, 4) });
+}

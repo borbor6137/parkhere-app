@@ -1,0 +1,16 @@
+node_modules/
+_backup/
+*.zip
+.env
+_install/
+.playwright-mcp/
+# ชั่วคราว: ภาพเก่ามีชื่อ-อีเมลคนจริง รอเจ้าของตัดสิน (P0-1)
+docs/qa/before/
+# ที่อยู่ API ของเครื่องนี้ (ตอน deploy ถูกเขียนใหม่ตอน build) ตัวอย่างอยู่ที่ config.example.js
+/config.js
+
+# repo สำหรับส่งงาน: เก็บไว้ในเครื่องเท่านั้น (เอกสารทีม/ตั้งค่า AI/ไฟล์เก่า)
+/docs/
+/.claude/
+/CLAUDE.md
+/board-simulator.html
